@@ -1,0 +1,45 @@
+<html>
+<head>
+<meta charset="UTF-8" />
+<script src="receivers.js"></script>
+<script src="pavlova.js"></script>
+<script>
+// Pavlova dispatcher UI
+// Copyright 2017 Pierre Ynard
+// Licensed under GPLv3+
+
+var xml_escape = function(text) {
+	var xml_entities = {
+		'&': '&amp;',
+		'<': '&lt;',
+		'>': '&gt;',
+		'"': '&quot;',
+		"'": '&apos;',
+	};
+	return text.replace(/[&<>"']/g, function(c) {
+		return xml_entities[c];
+	});
+};
+
+var redirect = function(url, description) {
+	if (url) {
+		description = description ?
+			'&quot;' + xml_escape(description) + '&quot; ' :
+			'';
+		document.body.innerHTML = 'Redirecting to ' + description + '&lt;' + xml_escape(url) + '&gt;&nbsp;...';
+		window.location.href = url;
+	} else
+		document.body.innerHTML = '<span style="color:red;font-weight:bold">No receiver available! Sorry, try again later; or browse by yourself more receivers at <a href="http://rx.linkfanel.net/">rx.linkfanel.net</a></span>';
+};
+
+var dispatch = function() {
+	var res = Pavlova.handle(null, redirect);
+	document.body.innerHTML = res ?
+		'Probing available receivers...' :
+		'Welcome to the pavlova dispatcher! Please call with valid redirection parameters.';
+};
+
+</script>
+</head>
+<body onload="dispatch()" />
+</html>

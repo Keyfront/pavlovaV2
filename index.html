@@ -1,46 +1,216 @@
-<html>
+<!DOCTYPE html>
+<html lang="fr">
 <head>
-<meta charset="UTF-8" />
-<script src="receivers.js"></script>
-<script src="pavlova.js"></script>
-<script>
-// Pavlova dispatcher UI
-// Copyright 2017 Pierre Ynard
-// Licensed under GPLv3+
+    <meta charset="UTF-8">
+    <title>Pavlova Dispatcher</title>
+    <script>
+        // Pavlova dispatcher UI
+        // Copyright 2017 Pierre Ynard
+        // Licensed under GPLv3+
 
-var xml_escape = function(text) {
-	var xml_entities = {
-		'&': '&amp;',
-		'<': '&lt;',
-		'>': '&gt;',
-		'"': '&quot;',
-		"'": '&apos;',
-	};
-	return text.replace(/[&<>"']/g, function(c) {
-		return xml_entities[c];
-	});
-};
+        var xml_escape = function(text) {
+            var xml_entities = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&apos;',
+            };
+            return text.replace(/[&<>"']/g, function(c) {
+                return xml_entities[c];
+            });
+        };
 
-var redirect = function(url, description) {
-	if (url) {
-		description = description ?
-			'&quot;' + xml_escape(description) + '&quot; ' :
-			'';
-		document.body.innerHTML = 'Redirecting to ' + description + '&lt;' + xml_escape(url) + '&gt;&nbsp;...';
-		window.location.href = url;
-	} else
-		document.body.innerHTML = '<span style="color:red;font-weight:bold">No receiver available! Sorry, try again later; or browse by yourself more receivers at <a href="http://rx.linkfanel.net/">rx.linkfanel.net</a></span>';
-};
+        var redirect = function(url, description) {
+            if (url) {
+                description = description ?
+                    '&quot;' + xml_escape(description) + '&quot; ' :
+                    '';
+                document.body.innerHTML = 'Redirecting to ' + description + '&lt;' + xml_escape(url) + '&gt;&nbsp;...';
+                window.location.href = url;
+            } else {
+                document.body.innerHTML = '<span style="color:red;font-weight:bold">No receiver available! Sorry, try again later; or browse by yourself more receivers at <a href="http://rx.linkfanel.net/">rx.linkfanel.net</a></span>';
+            }
+        };
 
-var dispatch = function() {
-	var res = Pavlova.handle(null, redirect);
-	document.body.innerHTML = res ?
-		'Probing available receivers...' :
-		'Welcome to the pavlova dispatcher! Please call with valid redirection parameters.';
-};
+        var dispatch = function() {
+            var res = Pavlova.handle(null, redirect);
+            document.body.innerHTML = res ?
+                'Probing available receivers...' :
+                'Welcome to the pavlova dispatcher! Please call with valid redirection parameters.';
+        };
+    </script>
 
-</script>
-<img src="http://126.80.167.175:8073/" />
+    <script>
+        // Pavlova dispatcher
+        // Copyright 2016-2017, 2021 Pierre Ynard
+        // Licensed under GPLv3+
+
+        var RX = function(url, freq, timeout) {
+            this.root = url;
+            this.redirect = this.root + (freq ? '?f=' + freq : '');
+            this.timeout = timeout;
+            this.status = null;
+            this.dsc = 'Receiver at ' + url;
+        };
+
+        RX.prototype = {
+            pending: function() {
+                return (this.status == null);
+            },
+            redirection: function() {
+                return this.status ? this.redirect : null;
+            },
+            description: function() {
+                return this.dsc;
+            },
+            probe: function(cb) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', this.root + 'status', true);
+                xhr.timeout = this.timeout;
+                var rx = this;
+                xhr.ontimeout = function(evt) {
+                    rx.status = false;
+                    cb();
+                };
+                xhr.onreadystatechange = function(evt) {
+                    if (xhr.readyState == 4) {
+                        if (xhr.status == 200) {
+                            var result = xhr.responseText.match(/\n\s*name=\s*([^\n]+?)\s*\n/);
+                            if (result != null) rx.dsc = result[1];
+
+                            if (/(^|\s+)status=(inactive|offline|private)\s*\n/.test(xhr.responseText))
+                                rx.status = false;
+                            else {
+                                result = xhr.responseText.match(/\s+users=(\d+)\s+users_max=(\d+)\s+/);
+                                rx.status = (result != null && Number(result[1]) < Number(result[2]));
+                            }
+                        } else rx.status = false;
+                        cb();
+                    }
+                };
+                xhr.send(null);
+            },
+        };
+
+        var Pavlova = function(url, receivers) {
+            var result = url.match(/(?:^|[\/\?#])([^\/\?#]+)(?:\/([^\/\?#]*))?(?:[\?#][^\/]*)?$/);
+            if (result == null) return;
+            var area = result[1];
+            var freq = result[2] ? result[2] : null;
+            var timeout = receivers.timeout != null ? receivers.timeout : 0;
+
+            if (receivers.area[area] == null) return;
+            this.rxs = receivers.area[area].map(function(rx) {
+                return new RX(rx, freq, timeout);
+            });
+            this.redirected = false;
+        };
+
+        Pavlova.prototype = {
+            redirect: function(url, description) {
+                if (url) window.location.href = url;
+                else alert("No receiver available! Sorry, try again later.");
+            },
+            check_all: function() {
+                if (this.redirected) return;
+
+                var failed = this.rxs.every(function(rx) {
+                    var pending = rx.pending();
+                    if (pending) return false;
+
+                    var url = rx.redirection();
+                    if (url && !this.redirected) {
+                        this.redirected = true;
+                        this.redirect(url, rx.description());
+                    }
+                    return !url;
+                }, this);
+
+                if (failed && !this.redirected) {
+                    this.redirected = true;
+                    this.redirect(null, null);
+                }
+            },
+            dispatch: function() {
+                this.rxs.forEach(function(rx) {
+                    var dispatcher = this;
+                    rx.probe(function() {
+                        dispatcher.check_all();
+                    });
+                }, this);
+            },
+        };
+
+        Pavlova.handle = function(arg, redirect_cb) {
+            var dispatcher = new Pavlova(arg ? arg : window.location.href, receivers);
+            if (dispatcher.rxs == null) return false;
+            if (redirect_cb) dispatcher.redirect = redirect_cb;
+            dispatcher.dispatch();
+            return true;
+        };
+    </script>
+
+    <script>
+        // Receiver configuration for Pavlova dispatcher
+        // Copyright 2016-2022 Pierre Ynard
+        // Licensed under GPLv3+
+
+        var receivers = {
+            area: {
+                a: [ // Asia, transmitted from Far East
+                    'https://sdr.wolfx.jp/',
+                    'http://szsdr.ddns.net:8073/',
+                    'https://nsk.swl.su/',
+                    'https://nsk2.swl.su/',
+                    'http://hl3amo.ddns.net:8074/',
+                    'http://hl5ntr.ddns.net:8073/',
+                    'http://jp7fso-kiwisdr.sytes.net:8073/',
+                    'http://126.80.167.175:8073/',
+                    'https://khv.swl.su/',
+                    'http://sdrsapporo.ddns.net:8073/',
+                    'http://hbsdr.proxy.kiwisdr.com:8073/',
+                    'http://msk.swl.su:8073/',
+                ],
+                m: [ // Mediterranean sea / Middle East
+                    'http://sv1btl.no-ip.org:8073/',
+                    'http://sdr.telcosol.gr:8073/',
+                    'http://9k2ra-1.proxy.kiwisdr.com:8073/',
+                    'http://9k2ra-2k.proxy.kiwisdr.com:8073/',
+                    'http://9k2ra-3.proxy.kiwisdr.com:8073/',
+                    'http://9k2ra-4.proxy.kiwisdr.com:8073/',
+                    'http://midskiwi.ddns.net:8073/',
+                    'http://sibamanna.duckdns.org:8073/',
+                    'http://kiwisdr.briata.org:8073/',
+                ],
+                n: [ // North America, transmitted from Cuba
+                    'http://lounix.net:8073/',
+                    'http://ka7u.no-ip.org:8073/',
+                    'http://76.127.43.125:8073/',
+                    'http://ranch-pt.no-ip.org:8073/',
+                    'http://ka7u.no-ip.org:8074/',
+                    'http://71.200.243.35:8073/',
+                    'http://km4rt.ddns.net:8073/',
+                    'http://raleigh.twrmon.net:8073/',
+                ],
+                p: [ // Pacific
+                    'http://jp7fso-kiwisdr.sytes.net:8073/',
+                    'http://126.80.167.175:8073/',
+                    'http://123.255.237.170:8073/',
+                    'http://hl3amo.ddns.net:8074/',
+                    'http://kfs.wsprdaemon.org:8073/',
+                    'http://mauisdr.wsprdaemon.org:8073/',
+                    'http://sdrsapporo.ddns.net:8073/',
+                    'http://wa6our.ddns.net:8073/',
+                    'http://kiwisdr.ece.uvic.ca:8073/',
+                    'http://119.224.45.205:8073/',
+                    'http://rjdevlin47.sytes.net:8073/',
+                ],
+            },
+            timeout: 5000, // Timeout when probing receivers, in milliseconds
+        };
+    </script>
 </head>
-<body onload="dispatch()" />
+<body onload="dispatch()">
+</body>
 </html>
